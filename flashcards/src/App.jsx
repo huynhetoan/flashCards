@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import "./index.css";
+import CardList from "./components/CardList";
+import AddForm from "./components/AddForm";
+import StudyView from "./components/StudyView";
 
 const defaults = [
   { id: 1, front: "What is React?", back: "A JavaScript UI library", flipped: false },
@@ -20,8 +23,7 @@ function App() {
     }
   });
 
-  const [front, setFront] = useState("");
-  const [back, setBack] = useState("");
+  const [studyMode, setStudyMode] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("flashcards", JSON.stringify(cards));
@@ -40,53 +42,42 @@ function App() {
       )
     );
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!front || !back) return;
+  const shuffleCards = () => {
+    const shuffled = [...cards];
 
-    addCard(front, back);
-    setFront("");
-    setBack("");
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    setCards(shuffled);
   };
+
+  if (studyMode) {
+    return (
+      <main>
+        <StudyView
+          cards={cards}
+          onBack={() => setStudyMode(false)}
+        />
+      </main>
+    );
+  }
 
   return (
     <main>
       <h1>Flashcards</h1>
 
-      <div className="cards">
-        {cards.map((card) => (
-          <div
-            key={card.id}
-            className="card"
-            onClick={() => flipCard(card.id)}
-          >
-            <button
-              className="delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                removeCard(card.id);
-              }}
-            >
-              x
-            </button>
-            {card.flipped ? card.back : card.front}
-          </div>
-        ))}
-      </div>
+      <button onClick={shuffleCards}>Shuffle</button>
+      <button onClick={() => setStudyMode(true)}>Study</button>
 
-      <form onSubmit={handleSubmit}>
-        <input
-          value={front}
-          onChange={(e) => setFront(e.target.value)}
-          placeholder="Front"
-        />
-        <input
-          value={back}
-          onChange={(e) => setBack(e.target.value)}
-          placeholder="Back"
-        />
-        <button type="submit">Add</button>
-      </form>
+      <CardList
+        cards={cards}
+        onFlip={flipCard}
+        onRemove={removeCard}
+      />
+
+      <AddForm onAdd={addCard} />
     </main>
   );
 }
