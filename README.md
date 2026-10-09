@@ -1,4 +1,12 @@
 # FlashCards
+
+To Start do:
+
+`cd flashcards`
+
+`npm run dev`
+
+
 ## Brave Prompt
 You are my strategy advisor and prompt engineer. I am the user. ChatGPT free tier is my coder. You write the prompts I give to GPT; I never show you code, you never see it.
 
