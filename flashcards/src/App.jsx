@@ -5,9 +5,24 @@ import AddForm from "./components/AddForm";
 import StudyView from "./components/StudyView";
 
 const defaults = [
-  { id: 1, front: "What is React?", back: "A JavaScript UI library", flipped: false },
-  { id: 2, front: "What is Vite?", back: "A frontend build tool", flipped: false },
-  { id: 3, front: "What is JSX?", back: "JavaScript syntax for UI", flipped: false },
+  {
+    id: 1,
+    front: "What is React?",
+    back: "A JavaScript UI library",
+    flipped: false,
+  },
+  {
+    id: 2,
+    front: "What is Vite?",
+    back: "A frontend build tool",
+    flipped: false,
+  },
+  {
+    id: 3,
+    front: "What is JSX?",
+    back: "JavaScript syntax for UI",
+    flipped: false,
+  },
 ];
 
 function App() {
@@ -29,18 +44,39 @@ function App() {
     localStorage.setItem("flashcards", JSON.stringify(cards));
   }, [cards]);
 
-  const addCard = (front, back) =>
-    setCards([...cards, { id: Date.now(), front, back, flipped: false }]);
+  const addCard = (front, back) => {
+    setCards((previousCards) => [
+      ...previousCards,
+      {
+        id: Date.now(),
+        front,
+        back,
+        flipped: false,
+      },
+    ]);
+  };
 
-  const removeCard = (id) =>
-    setCards(cards.filter((card) => card.id !== id));
+  const removeCard = (id) => {
+    setCards((previousCards) =>
+      previousCards.filter((card) => card.id !== id)
+    );
+  };
 
-  const flipCard = (id) =>
-    setCards(
-      cards.map((card) =>
+  const flipCard = (id) => {
+    setCards((previousCards) =>
+      previousCards.map((card) =>
         card.id === id ? { ...card, flipped: !card.flipped } : card
       )
     );
+  };
+
+  const editCard = (id, front, back) => {
+    setCards((previousCards) =>
+      previousCards.map((card) =>
+        card.id === id ? { ...card, front, back } : card
+      )
+    );
+  };
 
   const shuffleCards = () => {
     const shuffled = [...cards];
@@ -56,10 +92,7 @@ function App() {
   if (studyMode) {
     return (
       <main>
-        <StudyView
-          cards={cards}
-          onBack={() => setStudyMode(false)}
-        />
+        <StudyView cards={cards} onBack={() => setStudyMode(false)} />
       </main>
     );
   }
@@ -75,6 +108,7 @@ function App() {
         cards={cards}
         onFlip={flipCard}
         onRemove={removeCard}
+        onEdit={editCard}
       />
 
       <AddForm onAdd={addCard} />

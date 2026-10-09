@@ -1,40 +1,366 @@
+/* Global styles */
+
+* {
+  box-sizing: border-box;
+  }
+
+:root {
+font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+color: #1f2937;
+background: #f3f5f9;
+font-synthesis: none;
+text-rendering: optimizeLegibility;
+-webkit-font-smoothing: antialiased;
+-moz-osx-font-smoothing: grayscale;
+}
+
 body {
-  font-family: Arial, sans-serif;
-  margin: 40px;
+margin: 0;
+min-width: 320px;
+min-height: 100vh;
+padding: 40px 24px;
+background: #f3f5f9;
+color: #1f2937;
+line-height: 1.6;
 }
 
+/* Headings and text */
+h1 {
+margin: 0 0 24px;
+color: #111827;
+font-size: clamp(1.8rem, 4vw, 2.25rem);
+font-weight: 750;
+letter-spacing: -0.045em;
+line-height: 1.2;
+}
+
+p {
+color: #64748b;
+font-size: 0.95rem;
+}
+
+/* Buttons */
+button {
+min-height: 40px;
+padding: 9px 16px;
+border: 1px solid #2563eb;
+border-radius: 10px;
+background: #2563eb;
+color: #ffffff;
+font: inherit;
+font-size: 0.9rem;
+font-weight: 600;
+line-height: 1.4;
+cursor: pointer;
+transition:
+background-color 150ms ease,
+border-color 150ms ease,
+box-shadow 150ms ease,
+transform 150ms ease;
+}
+
+button:hover:not(:disabled) {
+border-color: #1d4ed8;
+background: #1d4ed8;
+}
+
+button:active:not(:disabled) {
+transform: translateY(1px);
+}
+
+button:disabled {
+border-color: #e2e8f0;
+background: #e2e8f0;
+color: #94a3b8;
+cursor: not-allowed;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+.card:focus-visible {
+outline: 3px solid #93c5fd;
+outline-offset: 3px;
+}
+
+/* Flashcard layout */
 .cards {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 30px;
+display: flex;
+flex-wrap: wrap;
+align-items: stretch;
+gap: 16px;
+margin: 28px 0 32px;
 }
 
+/* Individual cards */
 .card {
-  position: relative;
-  width: 200px;
-  min-height: 100px;
-  padding: 20px;
-  border: 1px solid #999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  text-align: center;
+position: relative;
+display: flex;
+flex: 0 1 240px;
+align-items: center;
+justify-content: center;
+min-width: 0;
+min-height: 150px;
+padding: 42px 22px 22px;
+overflow-wrap: anywhere;
+word-break: normal;
+border: 1px solid #e2e8f0;
+border-radius: 16px;
+background: #ffffff;
+box-shadow: 0 2px 5px rgb(15 23 42 / 4%);
+color: #1f2937;
+font-size: 1rem;
+font-weight: 500;
+line-height: 1.65;
+text-align: center;
+cursor: pointer;
+transition:
+border-color 160ms ease,
+box-shadow 160ms ease,
+transform 160ms ease;
 }
 
+.card:hover {
+transform: translateY(-2px);
+border-color: #bfdbfe;
+box-shadow: 0 8px 20px rgb(15 23 42 / 7%);
+}
+
+.card-content {
+width: 100%;
+overflow-wrap: anywhere;
+}
+
+/* Distinct delete action */
 .delete {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  cursor: pointer;
+position: absolute;
+top: 8px;
+right: 8px;
+display: inline-flex;
+align-items: center;
+justify-content: center;
+min-width: 30px;
+min-height: 30px;
+padding: 3px 8px;
+border: 1px solid #fee2e2;
+border-radius: 8px;
+background: #fef2f2;
+color: #b91c1c;
+font-size: 0.85rem;
+font-weight: 700;
+line-height: 1;
 }
 
+.delete:hover:not(:disabled) {
+border-color: #fecaca;
+background: #fee2e2;
+color: #991b1b;
+}
+
+/* Edit action */
+.edit {
+position: absolute;
+top: 8px;
+left: 8px;
+min-height: 30px;
+padding: 4px 10px;
+border: 1px solid #dbeafe;
+border-radius: 8px;
+background: #eff6ff;
+color: #1d4ed8;
+font-size: 0.8rem;
+}
+
+.edit:hover:not(:disabled) {
+border-color: #bfdbfe;
+background: #dbeafe;
+color: #1e40af;
+}
+
+/* Inline editing */
+.editing-card {
+display: block;
+flex-basis: 300px;
+align-self: stretch;
+padding: 18px;
+text-align: left;
+cursor: default;
+}
+
+.editing-card:hover {
+transform: none;
+border-color: #bfdbfe;
+}
+
+.edit-form {
+display: flex;
+flex-direction: column;
+gap: 14px;
+width: 100%;
+max-width: none;
+margin: 0;
+}
+
+.edit-form label {
+display: flex;
+flex-direction: column;
+gap: 6px;
+color: #334155;
+font-size: 0.85rem;
+font-weight: 600;
+}
+
+.edit-form textarea {
+display: block;
+width: 100%;
+min-width: 0;
+min-height: 76px;
+padding: 10px 12px;
+resize: vertical;
+border: 1px solid #cbd5e1;
+border-radius: 10px;
+background: #ffffff;
+color: #1f2937;
+font: inherit;
+font-size: 0.9rem;
+font-weight: 400;
+line-height: 1.5;
+overflow-wrap: anywhere;
+transition:
+border-color 150ms ease,
+box-shadow 150ms ease;
+}
+
+.edit-form textarea:hover {
+border-color: #94a3b8;
+}
+
+.edit-form textarea:focus {
+border-color: #3b82f6;
+outline: none;
+box-shadow: 0 0 0 3px rgb(59 130 246 / 15%);
+}
+
+.edit-error {
+margin: 0;
+color: #b91c1c;
+font-size: 0.85rem;
+line-height: 1.4;
+}
+
+.edit-actions {
+display: flex;
+flex-wrap: wrap;
+gap: 8px;
+}
+
+.edit-actions button {
+flex: 1 1 auto;
+}
+
+.edit-actions .cancel-edit {
+border-color: #cbd5e1;
+background: #ffffff;
+color: #475569;
+}
+
+.edit-actions .cancel-edit:hover:not(:disabled) {
+border-color: #94a3b8;
+background: #f1f5f9;
+color: #1f2937;
+}
+
+/* Add-card form */
 form {
-  display: flex;
-  gap: 10px;
+display: flex;
+flex-wrap: wrap;
+align-items: stretch;
+gap: 12px;
+max-width: 760px;
+margin-top: 24px;
 }
 
 input {
-  padding: 8px;
+flex: 1 1 200px;
+min-width: 0;
+min-height: 44px;
+padding: 10px 13px;
+border: 1px solid #cbd5e1;
+border-radius: 10px;
+background: #ffffff;
+color: #1f2937;
+font: inherit;
+font-size: 0.95rem;
+transition:
+border-color 150ms ease,
+box-shadow 150ms ease;
+}
+
+input::placeholder {
+color: #94a3b8;
+}
+
+input:hover {
+border-color: #94a3b8;
+}
+
+input:focus {
+border-color: #3b82f6;
+outline: none;
+box-shadow: 0 0 0 3px rgb(59 130 246 / 15%);
+}
+
+/* Comfortable spacing for smaller screens */
+@media (max-width: 600px) {
+body {
+padding: 28px 16px;
+}
+
+h1 {
+margin-bottom: 20px;
+}
+
+.cards {
+gap: 12px;
+margin: 22px 0 28px;
+}
+
+.card {
+flex-basis: 100%;
+min-height: 130px;
+padding: 42px 18px 24px;
+}
+
+.editing-card {
+padding: 18px;
+}
+
+form:not(.edit-form) {
+gap: 10px;
+}
+
+input {
+flex-basis: 100%;
+}
+
+form:not(.edit-form) button {
+width: 100%;
+}
+
+.edit-actions button {
+width: auto;
+}
+}
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+*,
+*::before,
+*::after {
+scroll-behavior: auto !important;
+transition-duration: 0.01ms !important;
+animation-duration: 0.01ms !important;
+animation-iteration-count: 1 !important;
+}
 }
