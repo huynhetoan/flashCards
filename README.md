@@ -6,6 +6,10 @@ To Start do:
 
 `npm run dev`
 
+To End do:
+
+`q + enter`
+
 ## Perplexity Prompt
 Resume my flashcard-app prompt-engineering workflow.
 
