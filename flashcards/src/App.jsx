@@ -1,60 +1,9 @@
-
 import { useEffect, useRef, useState } from "react";
 import "./index.css";
 import CardList from "./components/CardList";
 import AddForm from "./components/AddForm";
 import StudyView from "./components/StudyView";
-
-const DEFAULTS = [
-  {
-    id: 1,
-    front: "What is React?",
-    back: "A JavaScript UI library",
-    flipped: false,
-    deck: "General",
-  },
-  {
-    id: 2,
-    front: "What is Vite?",
-    back: "A frontend build tool",
-    flipped: false,
-    deck: "General",
-  },
-  {
-    id: 3,
-    front: "What is JSX?",
-    back: "JavaScript syntax for UI",
-    flipped: false,
-    deck: "General",
-  },
-];
-
-function normalizeCard(card) {
-  return {
-    ...card,
-    deck:
-      typeof card.deck === "string" && card.deck.trim()
-        ? card.deck.trim()
-        : "General",
-    flipped: typeof card.flipped === "boolean" ? card.flipped : false,
-  };
-}
-
-function readSavedCards() {
-  try {
-    const saved = localStorage.getItem("flashcards");
-
-    if (saved === null) return DEFAULTS;
-
-    const parsed = JSON.parse(saved);
-
-    if (!Array.isArray(parsed)) return DEFAULTS;
-
-    return parsed.map(normalizeCard);
-  } catch {
-    return DEFAULTS;
-  }
-}
+import { loadCards, saveCards } from "./lib/storage";
 
 function readSavedDecks() {
   try {
@@ -71,7 +20,7 @@ function readSavedDecks() {
       ];
     }
   } catch {
-    // Recover from invalid saved deck data.
+    // Fall back to the General deck if saved deck data is unavailable.
   }
 
   return ["General"];
@@ -85,14 +34,14 @@ function getInitialTheme() {
       return savedTheme;
     }
   } catch {
-    // Fall back to the System theme if storage is unavailable.
+    // Use the system theme if storage is unavailable.
   }
 
   return "system";
 }
 
 function App() {
-  const [cards, setCards] = useState(readSavedCards);
+  const [cards, setCards] = useState(loadCards);
   const [decks, setDecks] = useState(readSavedDecks);
   const [studyMode, setStudyMode] = useState(false);
   const [newDeckName, setNewDeckName] = useState("");
@@ -100,20 +49,18 @@ function App() {
   const [renameTo, setRenameTo] = useState("");
   const [importError, setImportError] = useState("");
   const [theme, setTheme] = useState(getInitialTheme);
+
   const fileInputRef = useRef(null);
 
-  // Apply the selected theme to the root element.
-  // System mode follows the operating-system color preference.
+  // Apply the selected theme and preserve theme preferences separately.
   useEffect(() => {
     const root = document.documentElement;
-    let mediaQuery;
+    const mediaQuery = window.matchMedia(
+      "(prefers-color-scheme: dark)"
+    );
 
     const applyTheme = () => {
-      const systemPrefersDark =
-        mediaQuery?.matches ?? window.matchMedia(
-          "(prefers-color-scheme: dark)"
-        ).matches;
-
+      const systemPrefersDark = mediaQuery.matches;
       const resolvedTheme =
         theme === "system"
           ? systemPrefersDark
@@ -128,10 +75,9 @@ function App() {
     try {
       localStorage.setItem("flashcards-theme", theme);
     } catch {
-      // The theme still works for this session without storage.
+      // The theme still works for this session if storage is unavailable.
     }
 
-    mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     applyTheme();
 
     if (theme === "system") {
@@ -143,31 +89,44 @@ function App() {
     }
 
     return () => {
-      if (!mediaQuery) return;
-
-      if (mediaQuery.removeEventListener) {
-        mediaQuery.removeEventListener("change", applyTheme);
-      } else {
-        mediaQuery.removeListener(applyTheme);
+      if (theme === "system") {
+        if (mediaQuery.removeEventListener) {
+          mediaQuery.removeEventListener("change", applyTheme);
+        } else {
+          mediaQuery.removeListener(applyTheme);
+        }
       }
     };
   }, [theme]);
 
+  // Card persistence is handled by the storage module.
+  // The helper protects unreadable saved data from automatic overwrites.
   useEffect(() => {
-    localStorage.setItem("flashcards", JSON.stringify(cards));
+    saveCards(cards);
   }, [cards]);
 
+  // Keep the existing deck persistence unchanged.
   useEffect(() => {
-    localStorage.setItem("flashcardDecks", JSON.stringify(decks));
+    try {
+      localStorage.setItem("flashcardDecks", JSON.stringify(decks));
+    } catch {
+      // The app remains usable if deck storage is unavailable.
+    }
   }, [decks]);
 
+  // Ensure every card's deck is represented in the deck list.
   useEffect(() => {
     setDecks((previousDecks) => {
       const names = new Set(previousDecks);
       names.add("General");
 
       cards.forEach((card) => {
-        names.add(normalizeCard(card).deck);
+        const deck =
+          typeof card.deck === "string" && card.deck.trim()
+            ? card.deck.trim()
+            : "General";
+
+        names.add(deck);
       });
 
       if (
@@ -203,7 +162,9 @@ function App() {
   const flipCard = (id) => {
     setCards((previousCards) =>
       previousCards.map((card) =>
-        card.id === id ? { ...card, flipped: !card.flipped } : card
+        card.id === id
+          ? { ...card, flipped: !card.flipped }
+          : card
       )
     );
   };
@@ -228,8 +189,9 @@ function App() {
     setCards((previousCards) => {
       const shuffled = [...previousCards];
 
-      for (let i = shuffled.length - 1; i > 0; i--) {
+      for (let i = shuffled.length - 1; i > 0; i -= 1) {
         const j = Math.floor(Math.random() * (i + 1));
+
         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
       }
 
@@ -242,9 +204,13 @@ function App() {
 
     const name = newDeckName.trim();
 
-    if (!name) return;
+    if (!name) {
+      return;
+    }
 
-    if (decks.some((deck) => deck.toLowerCase() === name.toLowerCase())) {
+    if (
+      decks.some((deck) => deck.toLowerCase() === name.toLowerCase())
+    ) {
       setImportError(`The deck "${name}" already exists.`);
       return;
     }
@@ -260,7 +226,9 @@ function App() {
     const oldName = renameFrom;
     const newName = renameTo.trim();
 
-    if (!newName || newName === oldName) return;
+    if (!newName || newName === oldName) {
+      return;
+    }
 
     if (
       decks.some(
@@ -274,15 +242,22 @@ function App() {
     }
 
     setCards((previousCards) =>
-      previousCards.map((card) =>
-        normalizeCard(card).deck === oldName
+      previousCards.map((card) => {
+        const cardDeck =
+          typeof card.deck === "string" && card.deck.trim()
+            ? card.deck.trim()
+            : "General";
+
+        return cardDeck === oldName
           ? { ...card, deck: newName }
-          : card
-      )
+          : card;
+      })
     );
 
     setDecks((previousDecks) =>
-      previousDecks.map((deck) => (deck === oldName ? newName : deck))
+      previousDecks.map((deck) =>
+        deck === oldName ? newName : deck
+      )
     );
 
     setRenameFrom(newName);
@@ -291,16 +266,20 @@ function App() {
   };
 
   const exportCards = () => {
-    const json = JSON.stringify(cards.map(normalizeCard), null, 2);
-    const blob = new Blob([json], { type: "application/json" });
+    const json = JSON.stringify(cards, null, 2);
+    const blob = new Blob([json], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
     link.href = url;
     link.download = "flashcards-backup.json";
+
     document.body.appendChild(link);
     link.click();
     link.remove();
+
     URL.revokeObjectURL(url);
   };
 
@@ -308,7 +287,9 @@ function App() {
     const input = event.target;
     const file = input.files?.[0];
 
-    if (!file) return;
+    if (!file) {
+      return;
+    }
 
     setImportError("");
 
@@ -323,13 +304,19 @@ function App() {
       }
 
       if (!Array.isArray(parsed)) {
-        throw new Error("The JSON file must contain an array of cards.");
+        throw new Error(
+          "The JSON file must contain an array of cards."
+        );
       }
 
       const seenIds = new Set();
 
       const validCards = parsed.map((card, index) => {
-        if (!card || typeof card !== "object" || Array.isArray(card)) {
+        if (
+          !card ||
+          typeof card !== "object" ||
+          Array.isArray(card)
+        ) {
           throw new Error(`Card ${index + 1} must be an object.`);
         }
 
@@ -338,11 +325,15 @@ function App() {
           (typeof card.id === "number" && Number.isFinite(card.id));
 
         if (!validId) {
-          throw new Error(`Card ${index + 1} is missing a valid ID.`);
+          throw new Error(
+            `Card ${index + 1} is missing a valid ID.`
+          );
         }
 
         if (seenIds.has(card.id)) {
-          throw new Error(`Card ${index + 1} has a duplicate ID.`);
+          throw new Error(
+            `Card ${index + 1} has a duplicate ID.`
+          );
         }
 
         seenIds.add(card.id);
@@ -362,24 +353,40 @@ function App() {
           card.deck !== undefined &&
           (typeof card.deck !== "string" || !card.deck.trim())
         ) {
-          throw new Error(`Card ${index + 1} has an invalid deck name.`);
+          throw new Error(
+            `Card ${index + 1} has an invalid deck name.`
+          );
         }
 
         if (
           card.flipped !== undefined &&
           typeof card.flipped !== "boolean"
         ) {
-          throw new Error(`Card ${index + 1} has an invalid flipped value.`);
+          throw new Error(
+            `Card ${index + 1} has an invalid flipped value.`
+          );
         }
 
-        return normalizeCard(card);
+        return {
+          ...card,
+          deck:
+            typeof card.deck === "string" && card.deck.trim()
+              ? card.deck.trim()
+              : "General",
+          flipped:
+            typeof card.flipped === "boolean"
+              ? card.flipped
+              : false,
+        };
       });
 
       const confirmed = window.confirm(
         `Import ${validCards.length} flashcard(s)? This will replace your current cards.`
       );
 
-      if (!confirmed) return;
+      if (!confirmed) {
+        return;
+      }
 
       setCards(validCards);
 
@@ -411,6 +418,7 @@ function App() {
 
         <div className="theme-control">
           <label htmlFor="theme-select">Theme</label>
+
           <select
             id="theme-select"
             value={theme}
@@ -432,8 +440,13 @@ function App() {
         <>
           <div className="toolbar">
             <button onClick={shuffleCards}>Shuffle</button>
-            <button onClick={() => setStudyMode(true)}>Study</button>
+
+            <button onClick={() => setStudyMode(true)}>
+              Study
+            </button>
+
             <button onClick={exportCards}>Export JSON</button>
+
             <button onClick={() => fileInputRef.current?.click()}>
               Import JSON
             </button>
@@ -451,6 +464,7 @@ function App() {
           {importError && (
             <p className="app-error" role="alert">
               {importError}
+
               <button
                 className="dismiss-error"
                 type="button"
@@ -468,18 +482,23 @@ function App() {
             <form onSubmit={createDeck}>
               <input
                 value={newDeckName}
-                onChange={(event) => setNewDeckName(event.target.value)}
+                onChange={(event) =>
+                  setNewDeckName(event.target.value)
+                }
                 placeholder="New deck name"
                 aria-label="New deck name"
                 maxLength={80}
               />
+
               <button type="submit">Create deck</button>
             </form>
 
             <form onSubmit={renameDeck}>
               <select
                 value={renameFrom}
-                onChange={(event) => setRenameFrom(event.target.value)}
+                onChange={(event) =>
+                  setRenameFrom(event.target.value)
+                }
                 aria-label="Deck to rename"
               >
                 {decks.map((deck) => (
@@ -491,7 +510,9 @@ function App() {
 
               <input
                 value={renameTo}
-                onChange={(event) => setRenameTo(event.target.value)}
+                onChange={(event) =>
+                  setRenameTo(event.target.value)
+                }
                 placeholder="New deck name"
                 aria-label="Renamed deck name"
                 maxLength={80}
