@@ -4,6 +4,7 @@ import CardList from "./components/CardList";
 import AddForm from "./components/AddForm";
 import StudyView from "./components/StudyView";
 import { loadCards, saveCards } from "./lib/storage";
+import { validateCardImportJson } from "./lib/validation";
 
 function readSavedDecks() {
   try {
@@ -99,13 +100,12 @@ function App() {
     };
   }, [theme]);
 
-  // Card persistence is handled by the storage module.
-  // The helper protects unreadable saved data from automatic overwrites.
+  // Card persistence remains in the storage module.
   useEffect(() => {
     saveCards(cards);
   }, [cards]);
 
-  // Keep the existing deck persistence unchanged.
+  // Keep deck persistence unchanged.
   useEffect(() => {
     try {
       localStorage.setItem("flashcardDecks", JSON.stringify(decks));
@@ -294,107 +294,33 @@ function App() {
     setImportError("");
 
     try {
+      // File reading stays in App.jsx.
       const text = await file.text();
-      let parsed;
 
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        throw new Error("The selected file is not valid JSON.");
+      // Validation is handled by the pure validation module.
+      const result = validateCardImportJson(text);
+
+      if (!result.success) {
+        setImportError(result.error);
+        return;
       }
 
-      if (!Array.isArray(parsed)) {
-        throw new Error(
-          "The JSON file must contain an array of cards."
-        );
-      }
-
-      const seenIds = new Set();
-
-      const validCards = parsed.map((card, index) => {
-        if (
-          !card ||
-          typeof card !== "object" ||
-          Array.isArray(card)
-        ) {
-          throw new Error(`Card ${index + 1} must be an object.`);
-        }
-
-        const validId =
-          (typeof card.id === "string" && card.id.trim() !== "") ||
-          (typeof card.id === "number" && Number.isFinite(card.id));
-
-        if (!validId) {
-          throw new Error(
-            `Card ${index + 1} is missing a valid ID.`
-          );
-        }
-
-        if (seenIds.has(card.id)) {
-          throw new Error(
-            `Card ${index + 1} has a duplicate ID.`
-          );
-        }
-
-        seenIds.add(card.id);
-
-        if (
-          typeof card.front !== "string" ||
-          !card.front.trim() ||
-          typeof card.back !== "string" ||
-          !card.back.trim()
-        ) {
-          throw new Error(
-            `Card ${index + 1} must have a non-empty question and answer.`
-          );
-        }
-
-        if (
-          card.deck !== undefined &&
-          (typeof card.deck !== "string" || !card.deck.trim())
-        ) {
-          throw new Error(
-            `Card ${index + 1} has an invalid deck name.`
-          );
-        }
-
-        if (
-          card.flipped !== undefined &&
-          typeof card.flipped !== "boolean"
-        ) {
-          throw new Error(
-            `Card ${index + 1} has an invalid flipped value.`
-          );
-        }
-
-        return {
-          ...card,
-          deck:
-            typeof card.deck === "string" && card.deck.trim()
-              ? card.deck.trim()
-              : "General",
-          flipped:
-            typeof card.flipped === "boolean"
-              ? card.flipped
-              : false,
-        };
-      });
-
+      // Do not replace existing cards until validation and confirmation pass.
       const confirmed = window.confirm(
-        `Import ${validCards.length} flashcard(s)? This will replace your current cards.`
+        `Import ${result.cards.length} flashcard(s)? This will replace your current cards.`
       );
 
       if (!confirmed) {
         return;
       }
 
-      setCards(validCards);
+      setCards(result.cards);
 
       setDecks((previousDecks) => [
         ...new Set([
           "General",
           ...previousDecks,
-          ...validCards.map((card) => card.deck),
+          ...result.cards.map((card) => card.deck),
         ]),
       ]);
 
@@ -407,6 +333,7 @@ function App() {
           : "Import failed. Please check your JSON file."
       );
     } finally {
+      // Allow the same file to be selected again after any outcome.
       input.value = "";
     }
   };
