@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from "react";
 import "./index.css";
 import CardList from "./components/CardList";
@@ -383,6 +384,43 @@ function App() {
     setImportError("");
   };
 
+  const deleteDeck = () => {
+    const deckToDelete = renameFrom;
+
+    if (deckToDelete === "General" || !decks.includes(deckToDelete)) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete the "${deckToDelete}" deck? Its cards will be moved to General.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setCards((previousCards) =>
+      previousCards.map((card) => {
+        const cardDeck =
+          typeof card.deck === "string" && card.deck.trim()
+            ? card.deck.trim()
+            : "General";
+
+        return cardDeck === deckToDelete
+          ? { ...card, deck: "General" }
+          : card;
+      })
+    );
+
+    setDecks((previousDecks) =>
+      previousDecks.filter((deck) => deck !== deckToDelete)
+    );
+
+    setRenameFrom("General");
+    setRenameTo("");
+    setImportError("");
+  };
+
   const exportCards = () => {
     const json = JSON.stringify(
       cards.map(serializeCardForExport),
@@ -548,7 +586,14 @@ function App() {
 
           <section className="starter-decks">
             <h2>Starter decks</h2>
-            <div className="starter-deck-actions">
+            <div
+              className="starter-deck-actions"
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "12px",
+              }}
+            >
               {STARTER_DECKS.map((pack) => (
                 <button
                   key={pack.key}
@@ -584,7 +629,7 @@ function App() {
               <select
                 value={renameFrom}
                 onChange={(event) => setRenameFrom(event.target.value)}
-                aria-label="Deck to rename"
+                aria-label="Deck to rename or delete"
               >
                 {decks.map((deck) => (
                   <option key={deck} value={deck}>
@@ -601,6 +646,13 @@ function App() {
                 maxLength={80}
               />
               <button type="submit">Rename deck</button>
+              <button
+                type="button"
+                onClick={deleteDeck}
+                disabled={renameFrom === "General"}
+              >
+                Delete deck
+              </button>
             </form>
           </section>
 

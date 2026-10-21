@@ -1,6 +1,23 @@
+
 import { useEffect, useState } from "react";
 import Card from "./Card";
 import { isDue } from "../lib/scheduling";
+
+const DECK_FILTER_STORAGE_KEY = "flashcards-selected-deck";
+
+function getInitialSelectedDeck(decks) {
+  try {
+    const savedDeck = localStorage.getItem(DECK_FILTER_STORAGE_KEY);
+
+    if (savedDeck === "All decks" || decks.includes(savedDeck)) {
+      return savedDeck;
+    }
+  } catch {
+    // Fall back to All decks if storage is unavailable.
+  }
+
+  return "All decks";
+}
 
 function getDueTime(card) {
   const due = card?.schedule?.due;
@@ -22,7 +39,9 @@ function CardList({
   onReviewDue,
 }) {
   const [search, setSearch] = useState("");
-  const [selectedDeck, setSelectedDeck] = useState("All decks");
+  const [selectedDeck, setSelectedDeck] = useState(() =>
+    getInitialSelectedDeck(decks)
+  );
 
   useEffect(() => {
     if (
@@ -30,6 +49,20 @@ function CardList({
       !decks.includes(selectedDeck)
     ) {
       setSelectedDeck("All decks");
+
+      try {
+        localStorage.setItem(DECK_FILTER_STORAGE_KEY, "All decks");
+      } catch {
+        // The filter remains usable for this session.
+      }
+
+      return;
+    }
+
+    try {
+      localStorage.setItem(DECK_FILTER_STORAGE_KEY, selectedDeck);
+    } catch {
+      // The filter remains usable for this session.
     }
   }, [decks, selectedDeck]);
 
