@@ -687,3 +687,40 @@ textarea:focus {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Cupcake-inspired palette */
+:root[data-theme="cupcake"] {
+  color-scheme: light;
+
+  --page-bg: #faf7f5;
+  --surface: #ffffff;
+  --surface-muted: #f4eeeb;
+
+  --text: #403238;
+  --heading: #30232a;
+  --text-muted: #75616a;
+  --placeholder: #8b7780;
+
+  --border: #d9c9cf;
+  --border-soft: #eadde2;
+  --border-hover: #bda3ae;
+
+  --primary: #96516f;
+  --primary-hover: #7d405b;
+  --primary-soft: #f9e8ef;
+  --primary-soft-border: #edc9d9;
+  --primary-soft-text: #793c57;
+
+  --danger-bg: #fff0ef;
+  --danger-border: #f5d2ce;
+  --danger-border-hover: #e8aaa3;
+  --danger-text: #a33732;
+  --danger-text-hover: #812823;
+
+  --focus-ring: #96516f;
+  --focus-glow: rgb(150 81 111 / 18%);
+
+  --shadow-card: 0 2px 5px rgb(80 45 60 / 4%);
+  --shadow-card-hover: 0 8px 20px rgb(80 45 60 / 8%);
+  --shadow-focus: 0 0 0 3px var(--focus-glow);
+}

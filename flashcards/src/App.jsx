@@ -37,7 +37,7 @@ function getInitialTheme() {
   try {
     const savedTheme = localStorage.getItem("flashcards-theme");
 
-    if (["light", "dark", "system"].includes(savedTheme)) {
+    if (["light", "dark", "cupcake", "system"].includes(savedTheme)) {
       return savedTheme;
     }
   } catch {
@@ -110,7 +110,7 @@ function App() {
           : theme;
 
       root.dataset.theme = resolvedTheme;
-      root.style.colorScheme = resolvedTheme;
+      root.style.colorScheme = resolvedTheme === "dark" ? "dark" : "light";
     };
 
     try {
@@ -538,6 +538,7 @@ function App() {
           >
             <option value="light">Light</option>
             <option value="dark">Dark</option>
+            <option value="cupcake">Cupcake</option>
             <option value="system">System</option>
           </select>
         </div>
