@@ -4,11 +4,12 @@ import CardList from "./components/CardList";
 import AddForm from "./components/AddForm";
 import StudyView from "./components/StudyView";
 import { loadCards, saveCards } from "./lib/storage";
+import { validateCardImportJson } from "./lib/validation";
 import {
   createSchedule,
   serializeSchedule,
 } from "./lib/scheduling";
-import { validateCardImportJson } from "./lib/validation";
+import { STARTER_DECKS } from "./lib/starterDecks";
 
 function readSavedDecks() {
   try {
@@ -53,7 +54,9 @@ function serializeReviewLog(log) {
   return Object.fromEntries(
     Object.entries(log).map(([key, value]) => [
       key,
-      value instanceof Date ? value.toISOString() : value,
+      value instanceof Date && Number.isFinite(value.getTime())
+        ? value.toISOString()
+        : value,
     ])
   );
 }
@@ -61,16 +64,16 @@ function serializeReviewLog(log) {
 function serializeCardForExport(card) {
   const result = {
     ...card,
-    reviewHistory: Array.isArray(card.reviewHistory)
-      ? card.reviewHistory.map(serializeReviewLog)
-      : card.reviewHistory,
+    ...(Array.isArray(card.reviewHistory)
+      ? { reviewHistory: card.reviewHistory.map(serializeReviewLog) }
+      : {}),
   };
 
   if (card.schedule !== undefined) {
     try {
       result.schedule = serializeSchedule(card.schedule);
     } catch {
-      // Preserve malformed existing data rather than silently resetting it.
+      // Preserve malformed supplied data rather than silently resetting it.
       result.schedule = card.schedule;
     }
   }
@@ -87,6 +90,7 @@ function App() {
   const [renameFrom, setRenameFrom] = useState("General");
   const [renameTo, setRenameTo] = useState("");
   const [importError, setImportError] = useState("");
+  const [starterDeckStatus, setStarterDeckStatus] = useState("");
   const [theme, setTheme] = useState(getInitialTheme);
 
   const fileInputRef = useRef(null);
@@ -96,9 +100,10 @@ function App() {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     const applyTheme = () => {
+      const systemPrefersDark = mediaQuery.matches;
       const resolvedTheme =
         theme === "system"
-          ? mediaQuery.matches
+          ? systemPrefersDark
             ? "dark"
             : "light"
           : theme;
@@ -186,6 +191,89 @@ function App() {
     ]);
   };
 
+  const addStarterDeck = (pack) => {
+    const existingCards = cards;
+    const existingStarterKeys = new Set(
+      existingCards
+        .map((card) => card.starterKey)
+        .filter((key) => typeof key === "string")
+    );
+    const usedIds = new Set(existingCards.map((card) => card.id));
+    const cardsToAdd = [];
+
+    pack.cards.forEach((presetCard, index) => {
+      const sequence = String(index + 1).padStart(3, "0");
+      const starterKey = `${pack.key}:${sequence}`;
+
+      // A starter key survives editing, export/import, and refresh.
+      if (existingStarterKeys.has(starterKey)) {
+        return;
+      }
+
+      const baseId = `starter:${pack.key}:${sequence}`;
+      let id = baseId;
+      let suffix = 1;
+
+      // Namespaced string IDs avoid normal numeric user-card IDs. If an
+      // imported/user-created ID still collides, choose an unused stable ID.
+      while (usedIds.has(id)) {
+        id = `${baseId}:${suffix}`;
+        suffix += 1;
+      }
+
+      usedIds.add(id);
+      existingStarterKeys.add(starterKey);
+
+      cardsToAdd.push({
+        id,
+        starterKey,
+        front: presetCard.front,
+        back: presetCard.back,
+        deck: pack.name,
+        flipped: false,
+        schedule: createSchedule(new Date()),
+        reviewHistory: [],
+      });
+    });
+
+    if (cardsToAdd.length === 0) {
+      setStarterDeckStatus(
+        `${pack.name} is already present; no cards were added.`
+      );
+      return;
+    }
+
+    setCards((previousCards) => {
+      const previousStarterKeys = new Set(
+        previousCards
+          .map((card) => card.starterKey)
+          .filter((key) => typeof key === "string")
+      );
+      const previousIds = new Set(previousCards.map((card) => card.id));
+
+      const missingCards = cardsToAdd.filter(
+        (card) =>
+          !previousStarterKeys.has(card.starterKey) &&
+          !previousIds.has(card.id)
+      );
+
+      return [...previousCards, ...missingCards];
+    });
+
+    setDecks((previousDecks) =>
+      previousDecks.some(
+        (deck) => deck.toLowerCase() === pack.name.toLowerCase()
+      )
+        ? previousDecks
+        : [...previousDecks, pack.name]
+    );
+
+    setStarterDeckStatus(
+      `Added ${cardsToAdd.length} card(s) to ${pack.name}.`
+    );
+    setImportError("");
+  };
+
   const removeCard = (id) => {
     setCards((previousCards) =>
       previousCards.filter((card) => card.id !== id)
@@ -238,7 +326,9 @@ function App() {
       return;
     }
 
-    if (decks.some((deck) => deck.toLowerCase() === name.toLowerCase())) {
+    if (
+      decks.some((deck) => deck.toLowerCase() === name.toLowerCase())
+    ) {
       setImportError(`The deck "${name}" already exists.`);
       return;
     }
@@ -276,12 +366,16 @@ function App() {
             ? card.deck.trim()
             : "General";
 
-        return cardDeck === oldName ? { ...card, deck: newName } : card;
+        return cardDeck === oldName
+          ? { ...card, deck: newName }
+          : card;
       })
     );
 
     setDecks((previousDecks) =>
-      previousDecks.map((deck) => (deck === oldName ? newName : deck))
+      previousDecks.map((deck) =>
+        deck === oldName ? newName : deck
+      )
     );
 
     setRenameFrom(newName);
@@ -295,8 +389,9 @@ function App() {
       null,
       2
     );
-
-    const blob = new Blob([json], { type: "application/json" });
+    const blob = new Blob([json], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
@@ -350,6 +445,7 @@ function App() {
       setStudyMode(false);
       setDueReviewCards(null);
       setImportError("");
+      setStarterDeckStatus("");
     } catch (error) {
       setImportError(
         error instanceof Error
@@ -361,42 +457,33 @@ function App() {
     }
   };
 
-  const startOrdinaryStudy = () => {
-    setDueReviewCards(null);
+  const startDueReview = (dueCards) => {
+    setDueReviewCards(dueCards);
     setStudyMode(true);
-  };
-
-  const startDueReview = (queue) => {
-    setDueReviewCards(queue);
-    setStudyMode(true);
-  };
-
-  const finishStudy = () => {
-    setStudyMode(false);
-    setDueReviewCards(null);
   };
 
   const recordReview = (cardId, schedule, log) => {
     setCards((previousCards) =>
-      previousCards.map((card) => {
-        if (card.id !== cardId) {
-          return card;
-        }
-
-        const existingHistory = Array.isArray(card.reviewHistory)
-          ? card.reviewHistory
-          : [];
-
-        return {
-          ...card,
-          schedule,
-          reviewHistory: [
-            ...existingHistory,
-            serializeReviewLog(log),
-          ],
-        };
-      })
+      previousCards.map((card) =>
+        card.id === cardId
+          ? {
+              ...card,
+              schedule,
+              reviewHistory: [
+                ...(Array.isArray(card.reviewHistory)
+                  ? card.reviewHistory
+                  : []),
+                serializeReviewLog(log),
+              ],
+            }
+          : card
+      )
     );
+  };
+
+  const leaveStudy = () => {
+    setStudyMode(false);
+    setDueReviewCards(null);
   };
 
   return (
@@ -406,7 +493,6 @@ function App() {
 
         <div className="theme-control">
           <label htmlFor="theme-select">Theme</label>
-
           <select
             id="theme-select"
             value={theme}
@@ -423,18 +509,15 @@ function App() {
         <StudyView
           cards={dueReviewCards ?? cards}
           reviewMode={dueReviewCards !== null}
-          onRecordReview={recordReview}
-          onBack={finishStudy}
+          onReviewRated={recordReview}
+          onBack={leaveStudy}
         />
       ) : (
         <>
           <div className="toolbar">
             <button onClick={shuffleCards}>Shuffle</button>
-
-            <button onClick={startOrdinaryStudy}>Study</button>
-
+            <button onClick={() => setStudyMode(true)}>Study</button>
             <button onClick={exportCards}>Export JSON</button>
-
             <button onClick={() => fileInputRef.current?.click()}>
               Import JSON
             </button>
@@ -452,7 +535,6 @@ function App() {
           {importError && (
             <p className="app-error" role="alert">
               {importError}
-
               <button
                 className="dismiss-error"
                 type="button"
@@ -463,6 +545,26 @@ function App() {
               </button>
             </p>
           )}
+
+          <section className="starter-decks">
+            <h2>Starter decks</h2>
+            <div className="starter-deck-actions">
+              {STARTER_DECKS.map((pack) => (
+                <button
+                  key={pack.key}
+                  type="button"
+                  onClick={() => addStarterDeck(pack)}
+                >
+                  Add {pack.name}
+                </button>
+              ))}
+            </div>
+            {starterDeckStatus && (
+              <p role="status" aria-live="polite">
+                {starterDeckStatus}
+              </p>
+            )}
+          </section>
 
           <section className="deck-management">
             <h2>Manage decks</h2>
@@ -475,7 +577,6 @@ function App() {
                 aria-label="New deck name"
                 maxLength={80}
               />
-
               <button type="submit">Create deck</button>
             </form>
 
@@ -499,7 +600,6 @@ function App() {
                 aria-label="Renamed deck name"
                 maxLength={80}
               />
-
               <button type="submit">Rename deck</button>
             </form>
           </section>

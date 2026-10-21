@@ -5,32 +5,47 @@ import {
   previewRatings,
 } from "../lib/scheduling";
 
-function formatDueTime(schedule) {
-  const due = schedule?.due;
+const RATING_OPTIONS = [
+  { label: "Again", rating: Rating.Again },
+  { label: "Hard", rating: Rating.Hard },
+  { label: "Good", rating: Rating.Good },
+  { label: "Easy", rating: Rating.Easy },
+];
 
-  if (!(due instanceof Date) || !Number.isFinite(due.getTime())) {
-    return "Unavailable";
+function formatDueTime(schedule) {
+  if (
+    !schedule ||
+    !(schedule.due instanceof Date) ||
+    !Number.isFinite(schedule.due.getTime())
+  ) {
+    return "Due date unavailable";
   }
 
-  return due.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  return schedule.due.toLocaleString();
+}
+
+function getRatingPreviews(card) {
+  if (!card?.schedule) {
+    return null;
+  }
+
+  try {
+    return previewRatings(card.schedule, new Date());
+  } catch {
+    return null;
+  }
 }
 
 function StudyView({
   cards,
-  onBack,
   reviewMode = false,
-  onRecordReview,
+  onReviewRated,
+  onBack,
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showBack, setShowBack] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [ratingInProgress, setRatingInProgress] = useState(false);
-
-  // Holds the ID of a card that has already been rated in this session.
-  // It deliberately stays set for that card after its rating succeeds.
   const ratedCardIds = useRef(new Set());
 
   useEffect(() => {
@@ -52,25 +67,35 @@ function StudyView({
         return;
       }
 
-      if (cards.length === 0 || completed) {
+      if (cards.length === 0 || (reviewMode && completed)) {
         return;
       }
-
-      // Prevent page scrolling only for study-mode controls.
-      event.preventDefault();
 
       if (event.repeat && isSpace) {
+        event.preventDefault();
         return;
       }
+
+      if (reviewMode) {
+        // In due review, Space can reveal the answer, but arrow keys
+        // cannot skip a card before it has been rated.
+        if (isSpace) {
+          event.preventDefault();
+          setShowBack((previousShowBack) => !previousShowBack);
+        }
+        return;
+      }
+
+      event.preventDefault();
 
       if (isSpace) {
         setShowBack((previousShowBack) => !previousShowBack);
-      } else if (!reviewMode && isRight) {
+      } else if (isRight) {
         setCurrentIndex((previousIndex) =>
           Math.min(cards.length - 1, previousIndex + 1)
         );
         setShowBack(false);
-      } else if (!reviewMode && isLeft) {
+      } else if (isLeft) {
         setCurrentIndex((previousIndex) =>
           Math.max(0, previousIndex - 1)
         );
@@ -83,10 +108,10 @@ function StudyView({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [cards.length, completed, reviewMode]);
+  }, [cards.length, reviewMode, completed]);
 
   const toggleAnswer = () => {
-    if (completed || ratingInProgress) {
+    if (reviewMode && completed) {
       return;
     }
 
@@ -108,8 +133,9 @@ function StudyView({
   };
 
   const card = cards[currentIndex];
+  const ratingPreviews = reviewMode ? getRatingPreviews(card) : null;
 
-  const rateCard = (label) => {
+  const rateCard = (ratingOption) => {
     if (
       !reviewMode ||
       !showBack ||
@@ -117,44 +143,34 @@ function StudyView({
       completed ||
       ratingInProgress ||
       ratedCardIds.current.has(card.id) ||
-      typeof onRecordReview !== "function"
+      !onReviewRated
     ) {
       return;
     }
 
-    const ratingValues = {
-      Again: Rating.Again,
-      Hard: Rating.Hard,
-      Good: Rating.Good,
-      Easy: Rating.Easy,
-    };
-
-    const rating = ratingValues[label];
-
-    if (rating === undefined) {
-      return;
-    }
-
-    // Lock this card synchronously, before any React state update.
+    // Lock this card immediately, before React re-renders, so a rapid
+    // double-click cannot record two reviews for the same card.
     ratedCardIds.current.add(card.id);
     setRatingInProgress(true);
 
     try {
-      const result = applyRating(card.schedule, rating, new Date());
+      const result = applyRating(
+        card.schedule,
+        ratingOption.rating,
+        new Date()
+      );
 
-      // Record one schedule update and one review log for this card.
-      onRecordReview(card.id, result.schedule, result.log);
+      onReviewRated(card.id, result.schedule, result.log);
+      setShowBack(false);
 
-      if (currentIndex + 1 >= cards.length) {
+      if (currentIndex >= cards.length - 1) {
         setCompleted(true);
       } else {
-        setCurrentIndex((index) => index + 1);
-        setShowBack(false);
+        setCurrentIndex((previousIndex) => previousIndex + 1);
       }
     } catch (error) {
-      // Allow a retry only if the rating operation failed.
       ratedCardIds.current.delete(card.id);
-      console.error("Unable to record FSRS review:", error);
+      console.error("Unable to record flashcard review:", error);
     } finally {
       setRatingInProgress(false);
     }
@@ -162,55 +178,87 @@ function StudyView({
 
   if (reviewMode && completed) {
     return (
-      <>
+      <section className="review-mode">
+        <style>{`
+          .review-mode .review-back-button {
+            margin-top: 20px;
+          }
+        `}</style>
+
         <h1>Due-card review complete</h1>
-
-        <p role="status">
-          You reviewed all {cards.length} card
-          {cards.length === 1 ? "" : "s"} in this session. Cards will return
-          when they are next due.
-        </p>
-
-        <button onClick={onBack}>Back to list</button>
-      </>
+        <p>You reviewed all cards in this queue.</p>
+        <button
+          type="button"
+          className="review-back-button"
+          onClick={onBack}
+        >
+          Back to list
+        </button>
+      </section>
     );
   }
 
   if (!card) {
     return (
-      <>
-        <h1>{reviewMode ? "Review due cards" : "Study Mode"}</h1>
-
+      <section className={reviewMode ? "review-mode" : undefined}>
+        <h1>{reviewMode ? "Due-card review" : "Study Mode"}</h1>
         <p>
           {reviewMode
-            ? "No due cards in this review session."
+            ? "There are no cards in this review queue."
             : "No flashcards to study yet."}
         </p>
-
-        <button onClick={onBack}>Back to list</button>
-      </>
+        <button
+          type="button"
+          className={reviewMode ? "review-back-button" : undefined}
+          onClick={onBack}
+        >
+          Back to list
+        </button>
+        {reviewMode && (
+          <style>{`
+            .review-mode .review-back-button {
+              margin-top: 20px;
+            }
+          `}</style>
+        )}
+      </section>
     );
   }
 
-  let ratingPreviews = null;
-
-  if (reviewMode && card.schedule) {
-    try {
-      ratingPreviews = previewRatings(card.schedule, new Date());
-    } catch (error) {
-      console.error("Unable to preview FSRS ratings:", error);
-    }
-  }
-
   return (
-    <>
-      <h1>{reviewMode ? "Review due cards" : "Study Mode"}</h1>
-
+    <section className={reviewMode ? "review-mode" : undefined}>
       {reviewMode && (
-        <p className="study-counter">
-          Due card {currentIndex + 1} of {cards.length}
-        </p>
+        <style>{`
+          .review-mode .review-rating-controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            gap: 12px;
+          }
+
+          .review-mode .review-rating-option {
+            display: flex;
+            flex: 1 1 110px;
+            flex-direction: column;
+            align-items: stretch;
+            min-width: 0;
+            gap: 6px;
+          }
+
+          .review-mode .review-rating-due {
+            font-size: 0.875rem;
+            line-height: 1.4;
+            text-align: center;
+            overflow-wrap: anywhere;
+          }
+
+          .review-mode .review-back-button {
+            margin-top: 20px;
+          }
+        `}</style>
       )}
+
+      <h1>{reviewMode ? "Due-card review" : "Study Mode"}</h1>
 
       <div
         className="card study-card"
@@ -228,14 +276,60 @@ function StudyView({
         {showBack ? card.back : card.front}
       </div>
 
-      {!reviewMode && (
+      <p className="study-counter">
+        Card {currentIndex + 1} of {cards.length}
+      </p>
+
+      {reviewMode ? (
         <>
-          <p className="study-counter">
-            Card {currentIndex + 1} of {cards.length}
+          <p className="keyboard-hint">
+            Reveal the answer before choosing a rating.
           </p>
 
+          <div className="review-rating-controls">
+            {RATING_OPTIONS.map((option) => {
+              const preview = ratingPreviews?.[option.label];
+              const disabled =
+                !showBack ||
+                ratingInProgress ||
+                ratedCardIds.current.has(card.id) ||
+                !preview;
+
+              return (
+                <div
+                  className="review-rating-option"
+                  key={option.label}
+                >
+                  <button
+                    type="button"
+                    onClick={() => rateCard(option)}
+                    disabled={disabled}
+                  >
+                    {option.label}
+                  </button>
+                  <span className="review-rating-due">
+                    {preview
+                      ? `Due: ${formatDueTime(preview.schedule)}`
+                      : "Due date unavailable"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            className="review-back-button"
+            onClick={onBack}
+          >
+            Back to list
+          </button>
+        </>
+      ) : (
+        <>
           <div className="study-controls">
             <button
+              type="button"
               onClick={previousCard}
               disabled={currentIndex === 0}
             >
@@ -243,6 +337,7 @@ function StudyView({
             </button>
 
             <button
+              type="button"
               onClick={nextCard}
               disabled={currentIndex === cards.length - 1}
             >
@@ -253,46 +348,13 @@ function StudyView({
           <p className="keyboard-hint">
             Keyboard: Space reveals the answer · ← previous · → next
           </p>
+
+          <button type="button" onClick={onBack}>
+            Back to list
+          </button>
         </>
       )}
-
-      {reviewMode && !showBack && (
-        <p className="keyboard-hint">
-          Reveal the answer before rating this card. Press Space or select the
-          card to reveal it.
-        </p>
-      )}
-
-      {reviewMode && showBack && (
-        <section className="study-controls" aria-label="Rate your recall">
-          {["Again", "Hard", "Good", "Easy"].map((label) => (
-            <button
-              key={label}
-              type="button"
-              disabled={
-                ratingInProgress ||
-                ratedCardIds.current.has(card.id) ||
-                !ratingPreviews
-              }
-              onClick={() => rateCard(label)}
-            >
-              {label}
-
-              {ratingPreviews && (
-                <span>
-                  {" "}
-                  · {formatDueTime(ratingPreviews[label].schedule)}
-                </span>
-              )}
-            </button>
-          ))}
-        </section>
-      )}
-
-      <button onClick={onBack} disabled={ratingInProgress}>
-        Back to list
-      </button>
-    </>
+    </section>
   );
 }
 
