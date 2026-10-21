@@ -4,6 +4,10 @@ import CardList from "./components/CardList";
 import AddForm from "./components/AddForm";
 import StudyView from "./components/StudyView";
 import { loadCards, saveCards } from "./lib/storage";
+import {
+  createSchedule,
+  serializeSchedule,
+} from "./lib/scheduling";
 import { validateCardImportJson } from "./lib/validation";
 
 function readSavedDecks() {
@@ -41,10 +45,44 @@ function getInitialTheme() {
   return "system";
 }
 
+function serializeReviewLog(log) {
+  if (!log || typeof log !== "object" || Array.isArray(log)) {
+    return log;
+  }
+
+  return Object.fromEntries(
+    Object.entries(log).map(([key, value]) => [
+      key,
+      value instanceof Date ? value.toISOString() : value,
+    ])
+  );
+}
+
+function serializeCardForExport(card) {
+  const result = {
+    ...card,
+    reviewHistory: Array.isArray(card.reviewHistory)
+      ? card.reviewHistory.map(serializeReviewLog)
+      : card.reviewHistory,
+  };
+
+  if (card.schedule !== undefined) {
+    try {
+      result.schedule = serializeSchedule(card.schedule);
+    } catch {
+      // Preserve malformed existing data rather than silently resetting it.
+      result.schedule = card.schedule;
+    }
+  }
+
+  return result;
+}
+
 function App() {
   const [cards, setCards] = useState(loadCards);
   const [decks, setDecks] = useState(readSavedDecks);
   const [studyMode, setStudyMode] = useState(false);
+  const [dueReviewCards, setDueReviewCards] = useState(null);
   const [newDeckName, setNewDeckName] = useState("");
   const [renameFrom, setRenameFrom] = useState("General");
   const [renameTo, setRenameTo] = useState("");
@@ -53,18 +91,14 @@ function App() {
 
   const fileInputRef = useRef(null);
 
-  // Apply the selected theme and preserve theme preferences separately.
   useEffect(() => {
     const root = document.documentElement;
-    const mediaQuery = window.matchMedia(
-      "(prefers-color-scheme: dark)"
-    );
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     const applyTheme = () => {
-      const systemPrefersDark = mediaQuery.matches;
       const resolvedTheme =
         theme === "system"
-          ? systemPrefersDark
+          ? mediaQuery.matches
             ? "dark"
             : "light"
           : theme;
@@ -100,12 +134,10 @@ function App() {
     };
   }, [theme]);
 
-  // Card persistence remains in the storage module.
   useEffect(() => {
     saveCards(cards);
   }, [cards]);
 
-  // Keep deck persistence unchanged.
   useEffect(() => {
     try {
       localStorage.setItem("flashcardDecks", JSON.stringify(decks));
@@ -114,7 +146,6 @@ function App() {
     }
   }, [decks]);
 
-  // Ensure every card's deck is represented in the deck list.
   useEffect(() => {
     setDecks((previousDecks) => {
       const names = new Set(previousDecks);
@@ -149,6 +180,8 @@ function App() {
         back,
         deck: deck || "General",
         flipped: false,
+        schedule: createSchedule(new Date()),
+        reviewHistory: [],
       },
     ]);
   };
@@ -162,9 +195,7 @@ function App() {
   const flipCard = (id) => {
     setCards((previousCards) =>
       previousCards.map((card) =>
-        card.id === id
-          ? { ...card, flipped: !card.flipped }
-          : card
+        card.id === id ? { ...card, flipped: !card.flipped } : card
       )
     );
   };
@@ -191,7 +222,6 @@ function App() {
 
       for (let i = shuffled.length - 1; i > 0; i -= 1) {
         const j = Math.floor(Math.random() * (i + 1));
-
         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
       }
 
@@ -208,9 +238,7 @@ function App() {
       return;
     }
 
-    if (
-      decks.some((deck) => deck.toLowerCase() === name.toLowerCase())
-    ) {
+    if (decks.some((deck) => deck.toLowerCase() === name.toLowerCase())) {
       setImportError(`The deck "${name}" already exists.`);
       return;
     }
@@ -248,16 +276,12 @@ function App() {
             ? card.deck.trim()
             : "General";
 
-        return cardDeck === oldName
-          ? { ...card, deck: newName }
-          : card;
+        return cardDeck === oldName ? { ...card, deck: newName } : card;
       })
     );
 
     setDecks((previousDecks) =>
-      previousDecks.map((deck) =>
-        deck === oldName ? newName : deck
-      )
+      previousDecks.map((deck) => (deck === oldName ? newName : deck))
     );
 
     setRenameFrom(newName);
@@ -266,10 +290,13 @@ function App() {
   };
 
   const exportCards = () => {
-    const json = JSON.stringify(cards, null, 2);
-    const blob = new Blob([json], {
-      type: "application/json",
-    });
+    const json = JSON.stringify(
+      cards.map(serializeCardForExport),
+      null,
+      2
+    );
+
+    const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
@@ -294,10 +321,7 @@ function App() {
     setImportError("");
 
     try {
-      // File reading stays in App.jsx.
       const text = await file.text();
-
-      // Validation is handled by the pure validation module.
       const result = validateCardImportJson(text);
 
       if (!result.success) {
@@ -305,7 +329,6 @@ function App() {
         return;
       }
 
-      // Do not replace existing cards until validation and confirmation pass.
       const confirmed = window.confirm(
         `Import ${result.cards.length} flashcard(s)? This will replace your current cards.`
       );
@@ -325,6 +348,7 @@ function App() {
       ]);
 
       setStudyMode(false);
+      setDueReviewCards(null);
       setImportError("");
     } catch (error) {
       setImportError(
@@ -333,9 +357,46 @@ function App() {
           : "Import failed. Please check your JSON file."
       );
     } finally {
-      // Allow the same file to be selected again after any outcome.
       input.value = "";
     }
+  };
+
+  const startOrdinaryStudy = () => {
+    setDueReviewCards(null);
+    setStudyMode(true);
+  };
+
+  const startDueReview = (queue) => {
+    setDueReviewCards(queue);
+    setStudyMode(true);
+  };
+
+  const finishStudy = () => {
+    setStudyMode(false);
+    setDueReviewCards(null);
+  };
+
+  const recordReview = (cardId, schedule, log) => {
+    setCards((previousCards) =>
+      previousCards.map((card) => {
+        if (card.id !== cardId) {
+          return card;
+        }
+
+        const existingHistory = Array.isArray(card.reviewHistory)
+          ? card.reviewHistory
+          : [];
+
+        return {
+          ...card,
+          schedule,
+          reviewHistory: [
+            ...existingHistory,
+            serializeReviewLog(log),
+          ],
+        };
+      })
+    );
   };
 
   return (
@@ -360,17 +421,17 @@ function App() {
 
       {studyMode ? (
         <StudyView
-          cards={cards}
-          onBack={() => setStudyMode(false)}
+          cards={dueReviewCards ?? cards}
+          reviewMode={dueReviewCards !== null}
+          onRecordReview={recordReview}
+          onBack={finishStudy}
         />
       ) : (
         <>
           <div className="toolbar">
             <button onClick={shuffleCards}>Shuffle</button>
 
-            <button onClick={() => setStudyMode(true)}>
-              Study
-            </button>
+            <button onClick={startOrdinaryStudy}>Study</button>
 
             <button onClick={exportCards}>Export JSON</button>
 
@@ -409,9 +470,7 @@ function App() {
             <form onSubmit={createDeck}>
               <input
                 value={newDeckName}
-                onChange={(event) =>
-                  setNewDeckName(event.target.value)
-                }
+                onChange={(event) => setNewDeckName(event.target.value)}
                 placeholder="New deck name"
                 aria-label="New deck name"
                 maxLength={80}
@@ -423,9 +482,7 @@ function App() {
             <form onSubmit={renameDeck}>
               <select
                 value={renameFrom}
-                onChange={(event) =>
-                  setRenameFrom(event.target.value)
-                }
+                onChange={(event) => setRenameFrom(event.target.value)}
                 aria-label="Deck to rename"
               >
                 {decks.map((deck) => (
@@ -437,9 +494,7 @@ function App() {
 
               <input
                 value={renameTo}
-                onChange={(event) =>
-                  setRenameTo(event.target.value)
-                }
+                onChange={(event) => setRenameTo(event.target.value)}
                 placeholder="New deck name"
                 aria-label="Renamed deck name"
                 maxLength={80}
@@ -456,6 +511,7 @@ function App() {
             onRemove={removeCard}
             onEdit={editCard}
             onAssignDeck={assignDeck}
+            onReviewDue={startDueReview}
           />
 
           <AddForm onAdd={addCard} decks={decks} />

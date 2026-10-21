@@ -1,10 +1,62 @@
+import {
+  createSchedule,
+  deserializeSchedule,
+} from "./scheduling";
+
+function validateReviewHistory(history, cardNumber) {
+  if (history === undefined) {
+    return { success: true, history: [] };
+  }
+
+  if (!Array.isArray(history)) {
+    return {
+      success: false,
+      error: `Card ${cardNumber} has invalid review history.`,
+    };
+  }
+
+  for (const log of history) {
+    if (!log || typeof log !== "object" || Array.isArray(log)) {
+      return {
+        success: false,
+        error: `Card ${cardNumber} has an invalid review-history entry.`,
+      };
+    }
+
+    for (const field of ["due", "review"]) {
+      if (log[field] !== undefined) {
+        if (
+          typeof log[field] !== "string" ||
+          log[field].trim() === ""
+        ) {
+          return {
+            success: false,
+            error: `Card ${cardNumber} has an invalid ${field} date in its review history.`,
+          };
+        }
+
+        const date = new Date(log[field]);
+
+        if (!Number.isFinite(date.getTime())) {
+          return {
+            success: false,
+            error: `Card ${cardNumber} has an invalid ${field} date in its review history.`,
+          };
+        }
+      }
+    }
+  }
+
+  return { success: true, history };
+}
+
 /**
  * Validate and normalize a JSON flashcard backup.
  *
  * This function is pure: it does not access React, localStorage, files,
  * dialogs, or other browser state.
  *
- * @param {string} jsonText The contents of a JSON backup file.
+ * @param {string} jsonText
  * @returns {{ success: true, cards: object[] } | { success: false, error: string }}
  */
 export function validateCardImportJson(jsonText) {
@@ -99,15 +151,40 @@ export function validateCardImportJson(jsonText) {
       };
     }
 
-    // Preserve all existing fields while applying legacy defaults.
+    let schedule;
+
+    if (card.schedule === undefined) {
+      // Accept legacy backups and initialize their schedules once on import.
+      schedule = createSchedule(new Date());
+    } else {
+      try {
+        schedule = deserializeSchedule(card.schedule);
+      } catch {
+        return {
+          success: false,
+          error: `Card ${cardNumber} has invalid scheduling data. No cards were imported.`,
+        };
+      }
+    }
+
+    const historyResult = validateReviewHistory(
+      card.reviewHistory,
+      cardNumber
+    );
+
+    if (!historyResult.success) {
+      return historyResult;
+    }
+
     cards.push({
       ...card,
       deck:
         typeof card.deck === "string" && card.deck.trim()
           ? card.deck.trim()
           : "General",
-      flipped:
-        typeof card.flipped === "boolean" ? card.flipped : false,
+      flipped: typeof card.flipped === "boolean" ? card.flipped : false,
+      schedule,
+      reviewHistory: historyResult.history,
     });
   }
 
