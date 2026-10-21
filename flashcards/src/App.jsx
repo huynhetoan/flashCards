@@ -4,57 +4,13 @@ import "./index.css";
 import CardList from "./components/CardList";
 import AddForm from "./components/AddForm";
 import StudyView from "./components/StudyView";
-
-const DEFAULTS = [
-  {
-    id: 1,
-    front: "What is React?",
-    back: "A JavaScript UI library",
-    flipped: false,
-    deck: "General",
-  },
-  {
-    id: 2,
-    front: "What is Vite?",
-    back: "A frontend build tool",
-    flipped: false,
-    deck: "General",
-  },
-  {
-    id: 3,
-    front: "What is JSX?",
-    back: "JavaScript syntax for UI",
-    flipped: false,
-    deck: "General",
-  },
-];
-
-function normalizeCard(card) {
-  return {
-    ...card,
-    deck:
-      typeof card.deck === "string" && card.deck.trim()
-        ? card.deck.trim()
-        : "General",
-    flipped: typeof card.flipped === "boolean" ? card.flipped : false,
-  };
-}
-
-function readSavedCards() {
-  try {
-    const saved = localStorage.getItem("flashcards");
-
-    if (saved === null) return DEFAULTS;
-
-    const parsed = JSON.parse(saved);
-
-    if (!Array.isArray(parsed)) return DEFAULTS;
-
-    return parsed.map(normalizeCard);
-  } catch {
-    return DEFAULTS;
-  }
-}
+import { loadCards, saveCards } from "./lib/storage";
+import { validateCardImportJson } from "./lib/validation";
+import {
+  createSchedule,
+  serializeSchedule,
+} from "./lib/scheduling";
+import { STARTER_DECKS } from "./lib/starterDecks";
 
 function readSavedDecks() {
   try {
@@ -71,7 +27,7 @@ function readSavedDecks() {
       ];
     }
   } catch {
-    // Recover from invalid saved deck data.
+    // Fall back to the General deck if saved deck data is unavailable.
   }
 
   return ["General"];
@@ -85,35 +41,67 @@ function getInitialTheme() {
       return savedTheme;
     }
   } catch {
-    // Fall back to the System theme if storage is unavailable.
+    // Use the system theme if storage is unavailable.
   }
 
   return "system";
 }
 
+function serializeReviewLog(log) {
+  if (!log || typeof log !== "object" || Array.isArray(log)) {
+    return log;
+  }
+
+  return Object.fromEntries(
+    Object.entries(log).map(([key, value]) => [
+      key,
+      value instanceof Date && Number.isFinite(value.getTime())
+        ? value.toISOString()
+        : value,
+    ])
+  );
+}
+
+function serializeCardForExport(card) {
+  const result = {
+    ...card,
+    ...(Array.isArray(card.reviewHistory)
+      ? { reviewHistory: card.reviewHistory.map(serializeReviewLog) }
+      : {}),
+  };
+
+  if (card.schedule !== undefined) {
+    try {
+      result.schedule = serializeSchedule(card.schedule);
+    } catch {
+      // Preserve malformed supplied data rather than silently resetting it.
+      result.schedule = card.schedule;
+    }
+  }
+
+  return result;
+}
+
 function App() {
-  const [cards, setCards] = useState(readSavedCards);
+  const [cards, setCards] = useState(loadCards);
   const [decks, setDecks] = useState(readSavedDecks);
   const [studyMode, setStudyMode] = useState(false);
+  const [dueReviewCards, setDueReviewCards] = useState(null);
   const [newDeckName, setNewDeckName] = useState("");
   const [renameFrom, setRenameFrom] = useState("General");
   const [renameTo, setRenameTo] = useState("");
   const [importError, setImportError] = useState("");
+  const [starterDeckStatus, setStarterDeckStatus] = useState("");
   const [theme, setTheme] = useState(getInitialTheme);
+
   const fileInputRef = useRef(null);
 
-  // Apply the selected theme to the root element.
-  // System mode follows the operating-system color preference.
   useEffect(() => {
     const root = document.documentElement;
-    let mediaQuery;
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     const applyTheme = () => {
-      const systemPrefersDark =
-        mediaQuery?.matches ?? window.matchMedia(
-          "(prefers-color-scheme: dark)"
-        ).matches;
-
+      const systemPrefersDark = mediaQuery.matches;
       const resolvedTheme =
         theme === "system"
           ? systemPrefersDark
@@ -128,10 +116,9 @@ function App() {
     try {
       localStorage.setItem("flashcards-theme", theme);
     } catch {
-      // The theme still works for this session without storage.
+      // The theme still works for this session if storage is unavailable.
     }
 
-    mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     applyTheme();
 
     if (theme === "system") {
@@ -143,22 +130,26 @@ function App() {
     }
 
     return () => {
-      if (!mediaQuery) return;
-
-      if (mediaQuery.removeEventListener) {
-        mediaQuery.removeEventListener("change", applyTheme);
-      } else {
-        mediaQuery.removeListener(applyTheme);
+      if (theme === "system") {
+        if (mediaQuery.removeEventListener) {
+          mediaQuery.removeEventListener("change", applyTheme);
+        } else {
+          mediaQuery.removeListener(applyTheme);
+        }
       }
     };
   }, [theme]);
 
   useEffect(() => {
-    localStorage.setItem("flashcards", JSON.stringify(cards));
+    saveCards(cards);
   }, [cards]);
 
   useEffect(() => {
-    localStorage.setItem("flashcardDecks", JSON.stringify(decks));
+    try {
+      localStorage.setItem("flashcardDecks", JSON.stringify(decks));
+    } catch {
+      // The app remains usable if deck storage is unavailable.
+    }
   }, [decks]);
 
   useEffect(() => {
@@ -167,7 +158,12 @@ function App() {
       names.add("General");
 
       cards.forEach((card) => {
-        names.add(normalizeCard(card).deck);
+        const deck =
+          typeof card.deck === "string" && card.deck.trim()
+            ? card.deck.trim()
+            : "General";
+
+        names.add(deck);
       });
 
       if (
@@ -190,8 +186,93 @@ function App() {
         back,
         deck: deck || "General",
         flipped: false,
+        schedule: createSchedule(new Date()),
+        reviewHistory: [],
       },
     ]);
+  };
+
+  const addStarterDeck = (pack) => {
+    const existingCards = cards;
+    const existingStarterKeys = new Set(
+      existingCards
+        .map((card) => card.starterKey)
+        .filter((key) => typeof key === "string")
+    );
+    const usedIds = new Set(existingCards.map((card) => card.id));
+    const cardsToAdd = [];
+
+    pack.cards.forEach((presetCard, index) => {
+      const sequence = String(index + 1).padStart(3, "0");
+      const starterKey = `${pack.key}:${sequence}`;
+
+      // A starter key survives editing, export/import, and refresh.
+      if (existingStarterKeys.has(starterKey)) {
+        return;
+      }
+
+      const baseId = `starter:${pack.key}:${sequence}`;
+      let id = baseId;
+      let suffix = 1;
+
+      // Namespaced string IDs avoid normal numeric user-card IDs. If an
+      // imported/user-created ID still collides, choose an unused stable ID.
+      while (usedIds.has(id)) {
+        id = `${baseId}:${suffix}`;
+        suffix += 1;
+      }
+
+      usedIds.add(id);
+      existingStarterKeys.add(starterKey);
+
+      cardsToAdd.push({
+        id,
+        starterKey,
+        front: presetCard.front,
+        back: presetCard.back,
+        deck: pack.name,
+        flipped: false,
+        schedule: createSchedule(new Date()),
+        reviewHistory: [],
+      });
+    });
+
+    if (cardsToAdd.length === 0) {
+      setStarterDeckStatus(
+        `${pack.name} is already present; no cards were added.`
+      );
+      return;
+    }
+
+    setCards((previousCards) => {
+      const previousStarterKeys = new Set(
+        previousCards
+          .map((card) => card.starterKey)
+          .filter((key) => typeof key === "string")
+      );
+      const previousIds = new Set(previousCards.map((card) => card.id));
+
+      const missingCards = cardsToAdd.filter(
+        (card) =>
+          !previousStarterKeys.has(card.starterKey) &&
+          !previousIds.has(card.id)
+      );
+
+      return [...previousCards, ...missingCards];
+    });
+
+    setDecks((previousDecks) =>
+      previousDecks.some(
+        (deck) => deck.toLowerCase() === pack.name.toLowerCase()
+      )
+        ? previousDecks
+        : [...previousDecks, pack.name]
+    );
+
+    setStarterDeckStatus(
+      `Added ${cardsToAdd.length} card(s) to ${pack.name}.`
+    );
+    setImportError("");
   };
 
   const removeCard = (id) => {
@@ -228,7 +309,7 @@ function App() {
     setCards((previousCards) => {
       const shuffled = [...previousCards];
 
-      for (let i = shuffled.length - 1; i > 0; i--) {
+      for (let i = shuffled.length - 1; i > 0; i -= 1) {
         const j = Math.floor(Math.random() * (i + 1));
         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
       }
@@ -242,9 +323,13 @@ function App() {
 
     const name = newDeckName.trim();
 
-    if (!name) return;
+    if (!name) {
+      return;
+    }
 
-    if (decks.some((deck) => deck.toLowerCase() === name.toLowerCase())) {
+    if (
+      decks.some((deck) => deck.toLowerCase() === name.toLowerCase())
+    ) {
       setImportError(`The deck "${name}" already exists.`);
       return;
     }
@@ -260,7 +345,9 @@ function App() {
     const oldName = renameFrom;
     const newName = renameTo.trim();
 
-    if (!newName || newName === oldName) return;
+    if (!newName || newName === oldName) {
+      return;
+    }
 
     if (
       decks.some(
@@ -274,15 +361,22 @@ function App() {
     }
 
     setCards((previousCards) =>
-      previousCards.map((card) =>
-        normalizeCard(card).deck === oldName
+      previousCards.map((card) => {
+        const cardDeck =
+          typeof card.deck === "string" && card.deck.trim()
+            ? card.deck.trim()
+            : "General";
+
+        return cardDeck === oldName
           ? { ...card, deck: newName }
-          : card
-      )
+          : card;
+      })
     );
 
     setDecks((previousDecks) =>
-      previousDecks.map((deck) => (deck === oldName ? newName : deck))
+      previousDecks.map((deck) =>
+        deck === oldName ? newName : deck
+      )
     );
 
     setRenameFrom(newName);
@@ -290,17 +384,62 @@ function App() {
     setImportError("");
   };
 
+  const deleteDeck = () => {
+    const deckToDelete = renameFrom;
+
+    if (deckToDelete === "General" || !decks.includes(deckToDelete)) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete the "${deckToDelete}" deck? Its cards will be moved to General.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setCards((previousCards) =>
+      previousCards.map((card) => {
+        const cardDeck =
+          typeof card.deck === "string" && card.deck.trim()
+            ? card.deck.trim()
+            : "General";
+
+        return cardDeck === deckToDelete
+          ? { ...card, deck: "General" }
+          : card;
+      })
+    );
+
+    setDecks((previousDecks) =>
+      previousDecks.filter((deck) => deck !== deckToDelete)
+    );
+
+    setRenameFrom("General");
+    setRenameTo("");
+    setImportError("");
+  };
+
   const exportCards = () => {
-    const json = JSON.stringify(cards.map(normalizeCard), null, 2);
-    const blob = new Blob([json], { type: "application/json" });
+    const json = JSON.stringify(
+      cards.map(serializeCardForExport),
+      null,
+      2
+    );
+    const blob = new Blob([json], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
     link.href = url;
     link.download = "flashcards-backup.json";
+
     document.body.appendChild(link);
     link.click();
     link.remove();
+
     URL.revokeObjectURL(url);
   };
 
@@ -308,91 +447,43 @@ function App() {
     const input = event.target;
     const file = input.files?.[0];
 
-    if (!file) return;
+    if (!file) {
+      return;
+    }
 
     setImportError("");
 
     try {
       const text = await file.text();
-      let parsed;
+      const result = validateCardImportJson(text);
 
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        throw new Error("The selected file is not valid JSON.");
+      if (!result.success) {
+        setImportError(result.error);
+        return;
       }
-
-      if (!Array.isArray(parsed)) {
-        throw new Error("The JSON file must contain an array of cards.");
-      }
-
-      const seenIds = new Set();
-
-      const validCards = parsed.map((card, index) => {
-        if (!card || typeof card !== "object" || Array.isArray(card)) {
-          throw new Error(`Card ${index + 1} must be an object.`);
-        }
-
-        const validId =
-          (typeof card.id === "string" && card.id.trim() !== "") ||
-          (typeof card.id === "number" && Number.isFinite(card.id));
-
-        if (!validId) {
-          throw new Error(`Card ${index + 1} is missing a valid ID.`);
-        }
-
-        if (seenIds.has(card.id)) {
-          throw new Error(`Card ${index + 1} has a duplicate ID.`);
-        }
-
-        seenIds.add(card.id);
-
-        if (
-          typeof card.front !== "string" ||
-          !card.front.trim() ||
-          typeof card.back !== "string" ||
-          !card.back.trim()
-        ) {
-          throw new Error(
-            `Card ${index + 1} must have a non-empty question and answer.`
-          );
-        }
-
-        if (
-          card.deck !== undefined &&
-          (typeof card.deck !== "string" || !card.deck.trim())
-        ) {
-          throw new Error(`Card ${index + 1} has an invalid deck name.`);
-        }
-
-        if (
-          card.flipped !== undefined &&
-          typeof card.flipped !== "boolean"
-        ) {
-          throw new Error(`Card ${index + 1} has an invalid flipped value.`);
-        }
-
-        return normalizeCard(card);
-      });
 
       const confirmed = window.confirm(
-        `Import ${validCards.length} flashcard(s)? This will replace your current cards.`
+        `Import ${result.cards.length} flashcard(s)? This will replace your current cards.`
       );
 
-      if (!confirmed) return;
+      if (!confirmed) {
+        return;
+      }
 
-      setCards(validCards);
+      setCards(result.cards);
 
       setDecks((previousDecks) => [
         ...new Set([
           "General",
           ...previousDecks,
-          ...validCards.map((card) => card.deck),
+          ...result.cards.map((card) => card.deck),
         ]),
       ]);
 
       setStudyMode(false);
+      setDueReviewCards(null);
       setImportError("");
+      setStarterDeckStatus("");
     } catch (error) {
       setImportError(
         error instanceof Error
@@ -402,6 +493,35 @@ function App() {
     } finally {
       input.value = "";
     }
+  };
+
+  const startDueReview = (dueCards) => {
+    setDueReviewCards(dueCards);
+    setStudyMode(true);
+  };
+
+  const recordReview = (cardId, schedule, log) => {
+    setCards((previousCards) =>
+      previousCards.map((card) =>
+        card.id === cardId
+          ? {
+              ...card,
+              schedule,
+              reviewHistory: [
+                ...(Array.isArray(card.reviewHistory)
+                  ? card.reviewHistory
+                  : []),
+                serializeReviewLog(log),
+              ],
+            }
+          : card
+      )
+    );
+  };
+
+  const leaveStudy = () => {
+    setStudyMode(false);
+    setDueReviewCards(null);
   };
 
   return (
@@ -425,8 +545,10 @@ function App() {
 
       {studyMode ? (
         <StudyView
-          cards={cards}
-          onBack={() => setStudyMode(false)}
+          cards={dueReviewCards ?? cards}
+          reviewMode={dueReviewCards !== null}
+          onReviewRated={recordReview}
+          onBack={leaveStudy}
         />
       ) : (
         <>
@@ -462,6 +584,33 @@ function App() {
             </p>
           )}
 
+          <section className="starter-decks">
+            <h2>Starter decks</h2>
+            <div
+              className="starter-deck-actions"
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "12px",
+              }}
+            >
+              {STARTER_DECKS.map((pack) => (
+                <button
+                  key={pack.key}
+                  type="button"
+                  onClick={() => addStarterDeck(pack)}
+                >
+                  Add {pack.name}
+                </button>
+              ))}
+            </div>
+            {starterDeckStatus && (
+              <p role="status" aria-live="polite">
+                {starterDeckStatus}
+              </p>
+            )}
+          </section>
+
           <section className="deck-management">
             <h2>Manage decks</h2>
 
@@ -480,7 +629,7 @@ function App() {
               <select
                 value={renameFrom}
                 onChange={(event) => setRenameFrom(event.target.value)}
-                aria-label="Deck to rename"
+                aria-label="Deck to rename or delete"
               >
                 {decks.map((deck) => (
                   <option key={deck} value={deck}>
@@ -496,8 +645,14 @@ function App() {
                 aria-label="Renamed deck name"
                 maxLength={80}
               />
-
               <button type="submit">Rename deck</button>
+              <button
+                type="button"
+                onClick={deleteDeck}
+                disabled={renameFrom === "General"}
+              >
+                Delete deck
+              </button>
             </form>
           </section>
 
@@ -508,6 +663,7 @@ function App() {
             onRemove={removeCard}
             onEdit={editCard}
             onAssignDeck={assignDeck}
+            onReviewDue={startDueReview}
           />
 
           <AddForm onAdd={addCard} decks={decks} />
