@@ -40,8 +40,19 @@ Next step:
 - First ask me whether I want to proceed with that Supabase planning prompt or do Step 10: keyboard controls in study mode (Space reveals/hides answer; Right Arrow next; Left Arrow previous).
 - Do not write code. Do not bundle features.
 
-## Brave Prompt
-TBD
+## Extra Prompt
+I work manually through browser chat. You cannot see my local files.
 
-## GPT Prompt
-TBD
+For every task:
+1. Ask for the current contents of any existing files you need.
+2. Do not invent their contents or assume earlier code is unchanged.
+3. List exactly which files will be created or modified.
+4. Work in small batches that I can apply and test.
+5. For each file, label CREATE or REPLACE and give its exact path.
+6. Give complete contents for short files.
+   For large files, ask whether I prefer a full replacement or
+   an exact, uniquely identifiable edit.
+7. Put terminal commands in a separate section and explain their effect.
+8. Give a concrete verification step and expected result.
+9. Stop and wait for my result before proceeding.
+10. Do not claim you tested anything unless you actually did.
